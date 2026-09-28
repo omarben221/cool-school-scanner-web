@@ -240,7 +240,35 @@ function MatiereSelectScreen({ filiereCode, filiereLabel, onSelect, onBack }) {
   );
 }
 
-function ScannerScreen({ authToken, onLogout, matiereChoisie, sensChoisi, modeLabel, onChangeMode, onBackOneStep }) {
+function GroupeSelectScreen({ matiereLabel, onSelect, onBack }) {
+  return (
+    <div className="root">
+      <img src="/logo.png" alt="Cool School" className="logo" />
+      <h1 className="header">2e scan</h1>
+      <button onClick={onBack} className="small-btn" style={{ marginBottom: 20 }}>
+        ← Retour aux matières
+      </button>
+
+      <div className="center-box">
+        <h2 className="title">{matiereLabel} — quel groupe ?</h2>
+        <p className="hint">
+          Utile quand cette matière a 2 séances le même jour (un groupe à une heure, l'autre à une
+          autre heure) — permet de bien séparer les présences des deux groupes.
+        </p>
+
+        <button className="mode-card" onClick={() => onSelect("G1")}>
+          <span className="mode-card-title">Groupe 1</span>
+        </button>
+
+        <button className="mode-card" style={{ marginTop: 14 }} onClick={() => onSelect("G2")}>
+          <span className="mode-card-title">Groupe 2</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ScannerScreen({ authToken, onLogout, matiereChoisie, groupeChoisi, sensChoisi, modeLabel, onChangeMode, onBackOneStep }) {
   const videoRef = useRef(null);
   const qrScannerRef = useRef(null);
   const lockRef = useRef(false);
@@ -269,7 +297,7 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, sensChoisi, modeLa
       const url = sensChoisi
         ? `${API_BASE}/students/${id}?sens=${sensChoisi}`
         : matiereChoisie
-        ? `${API_BASE}/students/${id}?matiere=${matiereChoisie}`
+        ? `${API_BASE}/students/${id}?matiere=${matiereChoisie}${groupeChoisi ? `&groupe=${groupeChoisi}` : ""}`
         : `${API_BASE}/students/${id}`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${authToken}` },
@@ -576,8 +604,18 @@ export default function App() {
       <MatiereSelectScreen
         filiereCode={scanConfig.filiere}
         filiereLabel={FILIERES[scanConfig.filiere] || scanConfig.filiere}
-        onSelect={(matiere) => setScanConfig({ ...scanConfig, matiere, step: "scan" })}
+        onSelect={(matiere) => setScanConfig({ ...scanConfig, matiere, step: "groupe" })}
         onBack={() => setScanConfig({ ...scanConfig, step: "filiere" })}
+      />
+    );
+  }
+
+  if (scanConfig.mode === "deuxieme" && scanConfig.step === "groupe") {
+    return (
+      <GroupeSelectScreen
+        matiereLabel={MATIERES[scanConfig.matiere] || scanConfig.matiere}
+        onSelect={(groupe) => setScanConfig({ ...scanConfig, groupe, step: "scan" })}
+        onBack={() => setScanConfig({ ...scanConfig, step: "matiere" })}
       />
     );
   }
@@ -587,14 +625,15 @@ export default function App() {
       authToken={authToken}
       onLogout={handleLogout}
       matiereChoisie={scanConfig.mode === "deuxieme" ? scanConfig.matiere : null}
+      groupeChoisi={scanConfig.mode === "deuxieme" ? scanConfig.groupe : null}
       modeLabel={
         scanConfig.mode === "deuxieme"
-          ? `2e scan · ${MATIERES[scanConfig.matiere] || scanConfig.matiere}`
+          ? `2e scan · ${MATIERES[scanConfig.matiere] || scanConfig.matiere} · ${scanConfig.groupe === "G1" ? "Groupe 1" : "Groupe 2"}`
           : "1er scan"
       }
       onChangeMode={() => setScanConfig(null)}
       onBackOneStep={
-        scanConfig.mode === "deuxieme" ? () => setScanConfig({ ...scanConfig, step: "matiere" }) : null
+        scanConfig.mode === "deuxieme" ? () => setScanConfig({ ...scanConfig, step: "groupe" }) : null
       }
     />
   );
