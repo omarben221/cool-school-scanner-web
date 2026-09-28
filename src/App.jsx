@@ -63,6 +63,16 @@ function getMatiereCodesForFiliere(filiereCode) {
 }
 
 const TOKEN_KEY = "cs_scanner_token";
+const ROLE_KEY = "cs_scanner_role";
+
+const TRANSPORT_STATUS_META = {
+  vert: { label: "Transport payé — à jour", color: "#2FA84F" },
+  orange: { label: "Paiement transport à venir (avant le 5)", color: "#E0A02E" },
+  rouge: { label: "Paiement transport en retard", color: "#E14343" },
+  gris: { label: "Non inscrit pour ce sens", color: "#6B6B6B" },
+  partiel: { label: "Paiement partiel — reste dû", color: "#3B82F6" },
+  essai: { label: "Cours d'essai — gratuit", color: "#06B6D4" },
+};
 
 function LoginScreen({ onLoggedIn }) {
   const [username, setUsername] = useState("");
@@ -82,9 +92,10 @@ function LoginScreen({ onLoggedIn }) {
         body: JSON.stringify({ username, password }),
       });
       if (!res.ok) throw new Error("identifiants_invalides");
-      const { token } = await res.json();
+      const { token, user } = await res.json();
       localStorage.setItem(TOKEN_KEY, token);
-      onLoggedIn(token);
+      localStorage.setItem(ROLE_KEY, user?.role || "");
+      onLoggedIn({ token, role: user?.role || "" });
     } catch (e2) {
       setError(true);
     } finally {
@@ -157,6 +168,33 @@ function ScanModeSelectScreen({ onSelectPremier, onSelectDeuxieme, onLogout }) {
   );
 }
 
+function TransportModeSelectScreen({ onSelectAller, onSelectRetour, onLogout }) {
+  return (
+    <div className="root">
+      <img src="/logo.png" alt="Cool School" className="logo" />
+      <h1 className="header">Scanner Transport</h1>
+      <button onClick={onLogout} className="small-btn" style={{ marginBottom: 20 }}>
+        Déconnexion
+      </button>
+
+      <div className="center-box">
+        <h2 className="title">Quel sens ?</h2>
+        <p className="hint">Choisis Aller ou Retour avant de scanner les élèves.</p>
+
+        <button className="mode-card" onClick={onSelectAller}>
+          <span className="mode-card-title">Aller</span>
+          <span className="mode-card-hint">Trajet du matin vers l'école</span>
+        </button>
+
+        <button className="mode-card" style={{ marginTop: 14 }} onClick={onSelectRetour}>
+          <span className="mode-card-title">Retour</span>
+          <span className="mode-card-hint">Trajet de l'école vers la maison</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FiliereSelectScreen({ onSelect, onBack }) {
   return (
     <div className="root">
@@ -202,7 +240,7 @@ function MatiereSelectScreen({ filiereCode, filiereLabel, onSelect, onBack }) {
   );
 }
 
-function ScannerScreen({ authToken, onLogout, matiereChoisie, modeLabel, onChangeMode, onBackOneStep }) {
+function ScannerScreen({ authToken, onLogout, matiereChoisie, sensChoisi, modeLabel, onChangeMode, onBackOneStep }) {
   const videoRef = useRef(null);
   const qrScannerRef = useRef(null);
   const lockRef = useRef(false);
@@ -228,7 +266,9 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, modeLabel, onChang
 
     setLoading(true);
     try {
-      const url = matiereChoisie
+      const url = sensChoisi
+        ? `${API_BASE}/students/${id}?sens=${sensChoisi}`
+        : matiereChoisie
         ? `${API_BASE}/students/${id}?matiere=${matiereChoisie}`
         : `${API_BASE}/students/${id}`;
       const res = await fetch(url, {
@@ -286,13 +326,14 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, modeLabel, onChang
   };
 
   const LIMIT_COLOR = "#7C3AED"; // violet — distinct des 4 statuts habituels
+  const statusMeta = sensChoisi ? TRANSPORT_STATUS_META : STATUS_META;
   const isPartiel = result?.student?.statut === "partiel" && !result.student.scanLimitReached;
   const statusColor = result?.student
     ? result.student.scanLimitReached
       ? LIMIT_COLOR
       : isPartiel
       ? "#2FA84F"
-      : STATUS_META[result.student.statut]?.color
+      : statusMeta[result.student.statut]?.color
     : null;
 
   const rootStyle = statusColor && !isPartiel ? { backgroundColor: statusColor } : undefined;
@@ -390,13 +431,17 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, modeLabel, onChang
               <p className="limit-badge-text">
                 {result.student.scanLimitRaison === "matiere_deja_scannee"
                   ? "⚠ Déjà scanné pour cette matière aujourd'hui"
+                  : result.student.scanLimitRaison === "transport_deja_scanne"
+                  ? `⚠ Déjà scanné pour le transport ${sensChoisi === "aller" ? "Aller" : "Retour"} aujourd'hui`
                   : "⚠ Le pointage (1er scan) a déjà été fait aujourd'hui"}
               </p>
             </div>
           ) : (
             <div className="scan-type-badge">
               <p className="scan-type-badge-text">
-                {result.student.scanType === "pointage" ? "Pointage (1er scan)" : "Deuxième passage"}
+                {sensChoisi
+                  ? `Transport — ${sensChoisi === "aller" ? "Aller" : "Retour"}`
+                  : result.student.scanType === "pointage" ? "Pointage (1er scan)" : "Deuxième passage"}
               </p>
             </div>
           )}
@@ -404,7 +449,7 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, modeLabel, onChang
           {!result.student.scanLimitReached && (
             <div className="badge">
               <span style={{ color: statusColor, fontWeight: 700 }}>
-                {STATUS_META[result.student.statut]?.label || "Statut inconnu"}
+                {statusMeta[result.student.statut]?.label || "Statut inconnu"}
               </span>
             </div>
           )}
@@ -415,18 +460,29 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, modeLabel, onChang
             </div>
           )}
 
-          <div className="matieres-box">
-            <p className="matieres-label">Inscrit en</p>
-            {(result.student.matieresInscrites || []).length === 0 ? (
-              <p className="matieres-empty">Aucune matière enregistrée</p>
-            ) : (
-              (result.student.matieresInscrites || []).map((code) => (
-                <p key={code} className="matiere-item">
-                  {MATIERES[code] || code}
-                </p>
-              ))
-            )}
-          </div>
+          {sensChoisi ? (
+            <div className="matieres-box">
+              <p className="matieres-label">Transport</p>
+              <p className="matiere-item">
+                {[result.student.transportAller && "Aller", result.student.transportRetour && "Retour"]
+                  .filter(Boolean)
+                  .join(" + ") || "Aucun sens enregistré"}
+              </p>
+            </div>
+          ) : (
+            <div className="matieres-box">
+              <p className="matieres-label">Inscrit en</p>
+              {(result.student.matieresInscrites || []).length === 0 ? (
+                <p className="matieres-empty">Aucune matière enregistrée</p>
+              ) : (
+                (result.student.matieresInscrites || []).map((code) => (
+                  <p key={code} className="matiere-item">
+                    {MATIERES[code] || code}
+                  </p>
+                ))
+              )}
+            </div>
+          )}
 
           <button className="btn" onClick={rescan}>Scanner un autre élève</button>
         </div>
@@ -438,17 +494,22 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, modeLabel, onChang
 export default function App() {
   const [checkingToken, setCheckingToken] = useState(true);
   const [authToken, setAuthToken] = useState(null);
-  const [scanConfig, setScanConfig] = useState(null); // null | {mode:'premier'} | {mode:'deuxieme', step, filiere, matiere}
+  const [role, setRole] = useState(null);
+  const [scanConfig, setScanConfig] = useState(null); // null | {mode:'premier'} | {mode:'deuxieme', step, filiere, matiere} | {mode:'transport', sens}
 
   useEffect(() => {
     const t = localStorage.getItem(TOKEN_KEY);
+    const r = localStorage.getItem(ROLE_KEY);
     setAuthToken(t);
+    setRole(r || null);
     setCheckingToken(false);
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(ROLE_KEY);
     setAuthToken(null);
+    setRole(null);
     setScanConfig(null);
   };
 
@@ -457,15 +518,46 @@ export default function App() {
   }
 
   if (!authToken) {
-    return <LoginScreen onLoggedIn={setAuthToken} />;
+    return (
+      <LoginScreen
+        onLoggedIn={({ token, role: r }) => {
+          setAuthToken(token);
+          setRole(r);
+        }}
+      />
+    );
   }
 
+  const isTransport = role === "transport";
+
   if (!scanConfig) {
+    if (isTransport) {
+      return (
+        <TransportModeSelectScreen
+          onSelectAller={() => setScanConfig({ mode: "transport", sens: "aller" })}
+          onSelectRetour={() => setScanConfig({ mode: "transport", sens: "retour" })}
+          onLogout={handleLogout}
+        />
+      );
+    }
     return (
       <ScanModeSelectScreen
         onSelectPremier={() => setScanConfig({ mode: "premier" })}
         onSelectDeuxieme={() => setScanConfig({ mode: "deuxieme", step: "filiere" })}
         onLogout={handleLogout}
+      />
+    );
+  }
+
+  if (scanConfig.mode === "transport") {
+    return (
+      <ScannerScreen
+        authToken={authToken}
+        onLogout={handleLogout}
+        sensChoisi={scanConfig.sens}
+        modeLabel={`Transport · ${scanConfig.sens === "aller" ? "Aller" : "Retour"}`}
+        onChangeMode={() => setScanConfig(null)}
+        onBackOneStep={null}
       />
     );
   }
