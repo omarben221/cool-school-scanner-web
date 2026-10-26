@@ -138,7 +138,7 @@ function LoginScreen({ onLoggedIn }) {
   );
 }
 
-function ScanModeSelectScreen({ onSelectPremier, onSelectDeuxieme, onLogout }) {
+function ScanModeSelectScreen({ onSelectAuto, onSelectSamedi, onLogout }) {
   return (
     <div className="root">
       <img src="/logo.png" alt="Cool School" className="logo" />
@@ -148,20 +148,20 @@ function ScanModeSelectScreen({ onSelectPremier, onSelectDeuxieme, onLogout }) {
       </button>
 
       <div className="center-box">
-        <h2 className="title">Quel scan ?</h2>
+        <h2 className="title">Scanner</h2>
         <p className="hint">
-          Le 1er scan est un pointage simple. Le 2e scan précise la matière, pour bien tracer les
-          présences par séance.
+          Un seul scan suffit : l'élève, son paiement et sa séance du moment (d'après l'emploi du
+          temps) sont reconnus automatiquement.
         </p>
 
-        <button className="mode-card" onClick={onSelectPremier}>
-          <span className="mode-card-title">1er scan</span>
-          <span className="mode-card-hint">Pointage — ouvre la caméra directement</span>
+        <button className="mode-card" onClick={onSelectAuto}>
+          <span className="mode-card-title">Scanner</span>
+          <span className="mode-card-hint">Ouvre la caméra directement</span>
         </button>
 
-        <button className="mode-card" style={{ marginTop: 14 }} onClick={onSelectDeuxieme}>
-          <span className="mode-card-title">2e scan</span>
-          <span className="mode-card-hint">Précise la filière et la matière avant de scanner</span>
+        <button className="mode-card" style={{ marginTop: 14 }} onClick={onSelectSamedi}>
+          <span className="mode-card-title">Samedi</span>
+          <span className="mode-card-hint">Choisis la filière et la matière, puis scanne</span>
         </button>
       </div>
     </div>
@@ -195,11 +195,11 @@ function TransportModeSelectScreen({ onSelectAller, onSelectRetour, onLogout }) 
   );
 }
 
-function FiliereSelectScreen({ onSelect, onBack }) {
+function FiliereSelectScreen({ onSelect, onBack, titre = "2e scan" }) {
   return (
     <div className="root">
       <img src="/logo.png" alt="Cool School" className="logo" />
-      <h1 className="header">2e scan</h1>
+      <h1 className="header">{titre}</h1>
       <button onClick={onBack} className="small-btn" style={{ marginBottom: 20 }}>
         ← Retour
       </button>
@@ -216,12 +216,12 @@ function FiliereSelectScreen({ onSelect, onBack }) {
   );
 }
 
-function MatiereSelectScreen({ filiereCode, filiereLabel, onSelect, onBack }) {
+function MatiereSelectScreen({ filiereCode, filiereLabel, onSelect, onBack, titre = "2e scan" }) {
   const codesDisponibles = getMatiereCodesForFiliere(filiereCode);
   return (
     <div className="root">
       <img src="/logo.png" alt="Cool School" className="logo" />
-      <h1 className="header">2e scan</h1>
+      <h1 className="header">{titre}</h1>
       <button onClick={onBack} className="small-btn" style={{ marginBottom: 20 }}>
         ← Retour aux filières
       </button>
@@ -268,7 +268,79 @@ function GroupeSelectScreen({ matiereLabel, onSelect, onBack }) {
   );
 }
 
-function ScannerScreen({ authToken, onLogout, matiereChoisie, groupeChoisi, sensChoisi, modeLabel, onChangeMode, onBackOneStep }) {
+function heureCourte(iso) {
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; }
+}
+function libelleSeance(o) {
+  return `${MATIERES[o.matiere] || o.matiere}${o.groupe ? ` · ${o.groupe === "G1" ? "Groupe 1" : "Groupe 2"}` : ""}${o.heure ? ` · ${o.heure}` : ""}`;
+}
+
+function SeanceInfo({ s, onChoisir, choixEnCours }) {
+  const se = s.seance || {};
+  let classe = "seance-ok";
+  let titre = "";
+  let detail = "";
+  switch (se.status) {
+    case "ok":
+      titre = `✅ Présent en ${libelleSeance(se)}`;
+      break;
+    case "deja":
+      classe = "seance-info";
+      titre = `Déjà scanné pour ${MATIERES[se.matiere] || se.matiere} aujourd'hui`;
+      detail = se.heureScan ? `à ${heureCourte(se.heureScan)}` : "";
+      break;
+    case "non_inscrit":
+      classe = "seance-ko";
+      titre = `⛔ NON inscrit en ${(se.matieres || []).map((m) => MATIERES[m] || m).join(" / ")}`;
+      detail = "La séance en cours est une matière qu'il ne suit pas.";
+      break;
+    case "aucune_seance_maintenant":
+      classe = "seance-info";
+      titre = "Aucune de ses séances en ce moment";
+      detail = se.prochaines && se.prochaines.length ? `Prochaine : ${libelleSeance(se.prochaines[0])}` : "";
+      break;
+    case "aucune_seance_aujourdhui":
+      classe = "seance-info";
+      titre = "Pas de séance aujourd'hui pour sa filière";
+      detail = "Vérifiez l'emploi du temps de la semaine dans le dashboard.";
+      break;
+    case "autre_filiere":
+      classe = "seance-ko";
+      titre = "⛔ Cet élève n'est pas dans cette filière";
+      detail = `Élève en ${FILIERES[s.filiere] || s.filiere} — filière choisie : ${FILIERES[se.filiere] || se.filiere}`;
+      break;
+    case "choix":
+      classe = "seance-choix";
+      titre = "Plusieurs séances en même temps — laquelle ?";
+      break;
+    default:
+      classe = "seance-info";
+      titre = "Séance non déterminée";
+  }
+  return (
+    <div className={"seance-box " + classe}>
+      <p className="seance-entree">
+        {s.pointage?.status === "deja" ? `Entrée déjà pointée à ${heureCourte(s.pointage.heure)}` : "Entrée enregistrée"}
+      </p>
+      <p className="seance-titre">{titre}</p>
+      {detail && <p className="seance-detail">{detail}</p>}
+      {se.status === "choix" &&
+        (se.options || []).map((o) => (
+          <button
+            key={o.matiere + (o.groupe || "")}
+            className="seance-choix-btn"
+            disabled={choixEnCours}
+            onClick={() => onChoisir(o)}
+          >
+            {libelleSeance(o)}
+          </button>
+        ))}
+    </div>
+  );
+}
+
+function ScannerScreen({ authToken, onLogout, matiereChoisie, groupeChoisi, sensChoisi, modeScan, filiereChoisie, modeLabel, onChangeMode, onBackOneStep }) {
   const videoRef = useRef(null);
   const qrScannerRef = useRef(null);
   const lockRef = useRef(false);
@@ -277,6 +349,27 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, groupeChoisi, sens
   const [scanning, setScanning] = useState(true);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null); // { student } | { notFound: true } | { error: true }
+  const dernierIdRef = useRef(null);
+  const [choixEnCours, setChoixEnCours] = useState(false);
+
+  // Après un scan avec plusieurs séances possibles : le personnel touche la bonne
+  const choisirSeance = async (o) => {
+    if (!dernierIdRef.current) return;
+    setChoixEnCours(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/students/${dernierIdRef.current}?mode=auto&matiere=${o.matiere}${o.groupe ? `&groupe=${o.groupe}` : ""}`,
+        { headers: { Authorization: `Bearer ${authToken}` } }
+      );
+      if (res.status === 401) { onLogout(); return; }
+      if (res.ok) setResult({ student: await res.json() });
+      else setResult({ error: true });
+    } catch (e) {
+      setResult({ error: true });
+    } finally {
+      setChoixEnCours(false);
+    }
+  };
 
   const handleScan = async (data) => {
     if (lockRef.current) return;
@@ -292,10 +385,15 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, groupeChoisi, sens
       return;
     }
 
+    dernierIdRef.current = id;
     setLoading(true);
     try {
       const url = sensChoisi
         ? `${API_BASE}/students/${id}?sens=${sensChoisi}`
+        : modeScan === "samedi"
+        ? `${API_BASE}/students/${id}?mode=samedi&filiere=${filiereChoisie}&matiere=${matiereChoisie}`
+        : modeScan === "auto"
+        ? `${API_BASE}/students/${id}?mode=auto`
         : matiereChoisie
         ? `${API_BASE}/students/${id}?matiere=${matiereChoisie}${groupeChoisi ? `&groupe=${groupeChoisi}` : ""}`
         : `${API_BASE}/students/${id}`;
@@ -454,7 +552,9 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, groupeChoisi, sens
             {FILIERES[result.student.filiere] || result.student.filiere}
           </p>
 
-          {result.student.scanLimitReached ? (
+          {result.student.mode ? (
+            <SeanceInfo s={result.student} onChoisir={choisirSeance} choixEnCours={choixEnCours} />
+          ) : result.student.scanLimitReached ? (
             <div className="limit-badge">
               <p className="limit-badge-text">
                 {result.student.scanLimitRaison === "matiere_deja_scannee"
@@ -474,7 +574,7 @@ function ScannerScreen({ authToken, onLogout, matiereChoisie, groupeChoisi, sens
             </div>
           )}
 
-          {!result.student.scanLimitReached && (
+          {(!result.student.scanLimitReached || result.student.mode) && (
             <div className="badge">
               <span style={{ color: statusColor, fontWeight: 700 }}>
                 {statusMeta[result.student.statut]?.label || "Statut inconnu"}
@@ -570,8 +670,8 @@ export default function App() {
     }
     return (
       <ScanModeSelectScreen
-        onSelectPremier={() => setScanConfig({ mode: "premier" })}
-        onSelectDeuxieme={() => setScanConfig({ mode: "deuxieme", step: "filiere" })}
+        onSelectAuto={() => setScanConfig({ mode: "auto" })}
+        onSelectSamedi={() => setScanConfig({ mode: "samedi", step: "filiere" })}
         onLogout={handleLogout}
       />
     );
@@ -590,32 +690,24 @@ export default function App() {
     );
   }
 
-  if (scanConfig.mode === "deuxieme" && scanConfig.step === "filiere") {
+  if (scanConfig.mode === "samedi" && scanConfig.step === "filiere") {
     return (
       <FiliereSelectScreen
+        titre="Samedi"
         onSelect={(filiere) => setScanConfig({ ...scanConfig, filiere, step: "matiere" })}
         onBack={() => setScanConfig(null)}
       />
     );
   }
 
-  if (scanConfig.mode === "deuxieme" && scanConfig.step === "matiere") {
+  if (scanConfig.mode === "samedi" && scanConfig.step === "matiere") {
     return (
       <MatiereSelectScreen
+        titre="Samedi"
         filiereCode={scanConfig.filiere}
         filiereLabel={FILIERES[scanConfig.filiere] || scanConfig.filiere}
-        onSelect={(matiere) => setScanConfig({ ...scanConfig, matiere, step: "groupe" })}
+        onSelect={(matiere) => setScanConfig({ ...scanConfig, matiere, step: "scan" })}
         onBack={() => setScanConfig({ ...scanConfig, step: "filiere" })}
-      />
-    );
-  }
-
-  if (scanConfig.mode === "deuxieme" && scanConfig.step === "groupe") {
-    return (
-      <GroupeSelectScreen
-        matiereLabel={MATIERES[scanConfig.matiere] || scanConfig.matiere}
-        onSelect={(groupe) => setScanConfig({ ...scanConfig, groupe, step: "scan" })}
-        onBack={() => setScanConfig({ ...scanConfig, step: "matiere" })}
       />
     );
   }
@@ -624,17 +716,16 @@ export default function App() {
     <ScannerScreen
       authToken={authToken}
       onLogout={handleLogout}
-      matiereChoisie={scanConfig.mode === "deuxieme" ? scanConfig.matiere : null}
-      groupeChoisi={scanConfig.mode === "deuxieme" ? scanConfig.groupe : null}
+      modeScan={scanConfig.mode === "samedi" ? "samedi" : "auto"}
+      filiereChoisie={scanConfig.mode === "samedi" ? scanConfig.filiere : null}
+      matiereChoisie={scanConfig.mode === "samedi" ? scanConfig.matiere : null}
       modeLabel={
-        scanConfig.mode === "deuxieme"
-          ? `2e scan · ${MATIERES[scanConfig.matiere] || scanConfig.matiere} · ${scanConfig.groupe === "G1" ? "Groupe 1" : "Groupe 2"}`
-          : "1er scan"
+        scanConfig.mode === "samedi"
+          ? `Samedi · ${FILIERES[scanConfig.filiere] || scanConfig.filiere} · ${MATIERES[scanConfig.matiere] || scanConfig.matiere}`
+          : "Scan unique"
       }
       onChangeMode={() => setScanConfig(null)}
-      onBackOneStep={
-        scanConfig.mode === "deuxieme" ? () => setScanConfig({ ...scanConfig, step: "groupe" }) : null
-      }
+      onBackOneStep={scanConfig.mode === "samedi" ? () => setScanConfig({ ...scanConfig, step: "matiere" }) : null}
     />
   );
 }
